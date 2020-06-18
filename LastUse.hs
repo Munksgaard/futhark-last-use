@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NamedFieldPuns #-}
 
 module LastUse (lastUseAction) where
@@ -8,6 +9,8 @@ import Data.Foldable
 import Data.Function ((&))
 import qualified Data.Map as Map
 import Data.Map (Map)
+import Futhark.Analysis.Alias (analyseStms)
+import Futhark.IR.Aliases (CanBeAliased)
 import Futhark.IR.KernelsMem (KernelsMem, MemOp (..), Prog (..), freeIn, typeOf)
 import Futhark.IR.Prop (ASTLore)
 import Futhark.IR.Prop.Names (FreeDec, FreeIn, Names, boundByStm, boundInBody, namesFromList, namesSubtract, namesToList)
@@ -27,7 +30,7 @@ lastUse stms =
         & namesToList
         & foldr (flip Map.insert i) m
 
-lastUseFun :: ASTLore lore => FunDef lore -> FutharkM ()
+lastUseFun :: (ASTLore lore, CanBeAliased (Op lore)) => FunDef lore -> FutharkM ()
 lastUseFun
   FunDef
     { funDefEntryPoint,
@@ -55,15 +58,20 @@ lastUseFun
 
     lastUse bodyStms
       & Map.toList
-      & fmap (\(k, v) -> pretty k ++ ": " ++ show v)
+      & fmap (\(vname, line_num) -> pretty vname ++ ": " ++ show line_num)
       & unlines
       & putStrLn
       & liftIO
 
-lastUseProg :: ASTLore lore => Prog lore -> FutharkM ()
+    analyseStms Map.empty bodyStms
+      & pretty
+      & putStrLn
+      & liftIO
+
+lastUseProg :: (ASTLore lore, CanBeAliased (Op lore)) => Prog lore -> FutharkM ()
 lastUseProg (Prog _ funs) = mapM_ lastUseFun funs
 
-lastUseAction :: ASTLore lore => Action lore
+lastUseAction :: (ASTLore lore, CanBeAliased (Op lore)) => Action lore
 lastUseAction =
   Action
     { actionName = "memory allocation lastUse analysis",
