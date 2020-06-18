@@ -9,12 +9,13 @@ import Data.Function ((&))
 import qualified Data.Map as Map
 import Data.Map (Map)
 import Futhark.IR.KernelsMem (KernelsMem, MemOp (..), Prog (..), freeIn, typeOf)
+import Futhark.IR.Prop (ASTLore)
 import Futhark.IR.Prop.Names (FreeDec, FreeIn, Names, boundByStm, boundInBody, namesFromList, namesSubtract, namesToList)
 import Futhark.IR.Syntax
 import Futhark.Pass
 import Futhark.Pipeline
 
-lastUse :: Stms KernelsMem -> Map VName Int
+lastUse :: ASTLore lore => Stms lore -> Map VName Int
 lastUse stms =
   zip (toList stms) [0 ..]
     & reverse
@@ -26,7 +27,7 @@ lastUse stms =
         & namesToList
         & foldr (flip Map.insert i) m
 
-lastUseFun :: FunDef KernelsMem -> FutharkM ()
+lastUseFun :: ASTLore lore => FunDef lore -> FutharkM ()
 lastUseFun
   FunDef
     { funDefEntryPoint,
@@ -59,10 +60,10 @@ lastUseFun
       & putStrLn
       & liftIO
 
-lastUseProg :: Prog KernelsMem -> FutharkM ()
+lastUseProg :: ASTLore lore => Prog lore -> FutharkM ()
 lastUseProg (Prog _ funs) = mapM_ lastUseFun funs
 
-lastUseAction :: Action KernelsMem
+lastUseAction :: ASTLore lore => Action lore
 lastUseAction =
   Action
     { actionName = "memory allocation lastUse analysis",
