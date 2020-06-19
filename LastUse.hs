@@ -16,22 +16,25 @@ import Futhark.IR.Prop.Names (FreeIn, Names, namesToList)
 import Futhark.IR.Syntax
 import Futhark.Pipeline
 
-lastUse :: ASTLore lore => Map VName Names -> Stms lore -> Map VName Int
-lastUse aliases stms =
-  let withoutAliasing =
-        zip (toList stms) [0 ..]
-          & reverse
-          & foldr helper Map.empty
-   in Map.foldrWithKey applyAliases withoutAliasing withoutAliasing
+applyAliases :: Map VName Names -> Map VName Int -> Map VName Int
+applyAliases aliases last_uses =
+  Map.foldrWithKey helper last_uses last_uses
+  where
+    helper :: VName -> Int -> Map VName Int -> Map VName Int
+    helper vname0 line_num m0 =
+      foldr (\vname m -> Map.insertWith max vname line_num m) m0 (maybe [] namesToList $ aliases !? vname0)
+
+lastUse :: ASTLore lore => Stms lore -> Map VName Int
+lastUse stms =
+  zip (toList stms) [0 ..]
+    & reverse
+    & foldr helper Map.empty
   where
     helper :: FreeIn a => (a, Int) -> Map VName Int -> Map VName Int
     helper (stm, i) m =
       freeIn stm
         & namesToList
         & foldr (`Map.insert` i) m
-    applyAliases :: VName -> Int -> Map VName Int -> Map VName Int
-    applyAliases vname0 line_num m0 =
-      foldr (\vname m -> Map.insertWith max vname line_num m) m0 (maybe [] namesToList $ aliases !? vname0)
 
 lastUseFun :: (ASTLore lore, CanBeAliased (Op lore)) => FunDef lore -> FutharkM ()
 lastUseFun
@@ -70,7 +73,16 @@ lastUseFun
       & putStrLn
       & liftIO
 
-    lastUse aliases bodyStms
+    let last_use_map = lastUse bodyStms
+
+    last_use_map
+      & Map.toList
+      & fmap (\(vname, line_num) -> pretty vname ++ ": " ++ show line_num)
+      & unlines
+      & putStrLn
+      & liftIO
+
+    applyAliases aliases last_use_map
       & Map.toList
       & fmap (\(vname, line_num) -> pretty vname ++ ": " ++ show line_num)
       & unlines
