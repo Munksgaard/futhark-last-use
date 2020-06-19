@@ -21,6 +21,7 @@ executable futhark-last-use
   main-is:             Main.hs
   -- other-modules:
   -- other-extensions:
+  ghc-options:         -Wall -Werror -Wcompat -Wredundant-constraints -Wincomplete-record-updates -Wmissing-export-lists
   build-depends:       base >=4.14 && <4.15, futhark >= 0.15.8, containers
   -- hs-source-dirs:
   default-language:    Haskell2010

@@ -3,7 +3,6 @@
 
 module LastUse (lastUseAction) where
 
-import Control.Monad
 import Control.Monad.IO.Class
 import Data.Foldable
 import Data.Function ((&))
@@ -11,11 +10,10 @@ import qualified Data.Map as Map
 import Data.Map (Map, (!?))
 import Futhark.Analysis.Alias (analyseStms)
 import Futhark.IR.Aliases (CanBeAliased)
-import Futhark.IR.KernelsMem (KernelsMem, MemOp (..), Prog (..), freeIn, typeOf)
+import Futhark.IR.KernelsMem (freeIn)
 import Futhark.IR.Prop (ASTLore)
-import Futhark.IR.Prop.Names (FreeDec, FreeIn, Names, boundByStm, boundInBody, namesFromList, namesSubtract, namesToList)
+import Futhark.IR.Prop.Names (FreeIn, Names, namesToList)
 import Futhark.IR.Syntax
-import Futhark.Pass
 import Futhark.Pipeline
 
 lastUse :: ASTLore lore => Map VName Names -> Stms lore -> Map VName Int
@@ -38,10 +36,9 @@ lastUse aliases stms =
 lastUseFun :: (ASTLore lore, CanBeAliased (Op lore)) => FunDef lore -> FutharkM ()
 lastUseFun
   FunDef
-    { funDefEntryPoint,
-      funDefName,
+    { funDefName,
       funDefParams,
-      funDefBody = body@Body {bodyDec, bodyStms, bodyResult}
+      funDefBody = Body {bodyDec, bodyStms, bodyResult}
     } = do
     liftIO $ putStrLn $ "Analyzing " ++ show funDefName
     liftIO $
@@ -55,9 +52,9 @@ lastUseFun
             show bodyResult
           ]
 
-    let (stms, (aliases, consumed)) = analyseStms Map.empty bodyStms
+    let (stms, (aliases, _)) = analyseStms Map.empty bodyStms
 
-    zip (toList stms) [0 ..]
+    zip (toList stms) [0 :: Int ..]
       & fmap (\(stm, i) -> show i ++ ": " ++ show stm)
       & unlines
       & putStrLn
@@ -67,7 +64,7 @@ lastUseFun
       & putStrLn
       & liftIO
 
-    zip (toList bodyStms) [0 ..]
+    zip (toList bodyStms) [0 :: Int ..]
       & fmap (\(stm, i) -> show i ++ ": " ++ pretty stm)
       & unlines
       & putStrLn
