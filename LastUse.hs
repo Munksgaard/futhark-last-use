@@ -28,7 +28,7 @@ lastUse aliases stms =
     helper (stm, i) m =
       freeIn stm
         & namesToList
-        & foldr (flip Map.insert i) m
+        & foldr (`Map.insert` i) m
     applyAliases :: VName -> Int -> Map VName Int -> Map VName Int
     applyAliases vname0 line_num m0 =
       foldr (\vname m -> Map.insertWith max vname line_num m) m0 (maybe [] namesToList $ aliases !? vname0)
