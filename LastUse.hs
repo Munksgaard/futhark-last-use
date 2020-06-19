@@ -24,8 +24,8 @@ applyAliases aliases last_uses =
     helper vname0 line_num m0 =
       foldr (\vname m -> Map.insertWith max vname line_num m) m0 (maybe [] namesToList $ aliases !? vname0)
 
-lastUse :: ASTLore lore => Stms lore -> Map VName Int
-lastUse stms =
+lastUses :: ASTLore lore => Stms lore -> Map VName Int
+lastUses stms =
   zip (toList stms) [0 ..]
     & reverse
     & foldr helper Map.empty
@@ -73,7 +73,7 @@ lastUseFun
       & putStrLn
       & liftIO
 
-    let last_use_map = lastUse bodyStms
+    let last_use_map = lastUses bodyStms
 
     last_use_map
       & Map.toList
