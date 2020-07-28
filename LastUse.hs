@@ -1,11 +1,12 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module LastUse (lastUseAction) where
+module Futhark.Analysis.LastUse (lastUseAction, analyseFun, analyseStms, LastUseMap) where
 
 import Control.Monad.IO.Class
 import qualified Data.Map as Map
 import Data.Map (Map)
+import Debug.Trace
 import Futhark.Analysis.Alias (aliasAnalysis)
 import Futhark.IR.Aliases
 import Futhark.IR.KernelsMem
@@ -24,7 +25,7 @@ lastUseAction =
       liftIO $ putStrLn $ "Analyzing " ++ show (funDefName fun)
       liftIO $ putStrLn $ unwords ["Params:", show $ funDefParams fun]
 
-      let (lumap :: LastUseMap, _) = analyseBody mempty mempty $ funDefBody fun
+      let (lumap :: LastUseMap, _) = analyseFun mempty mempty fun
 
       liftIO $ putStrLn $ unlines $ pretty <$> Map.toList lumap
 
@@ -37,6 +38,11 @@ type LastUseMap = Map VName Names
 
 type UsedNames = Names
 
+analyseFun :: LastUseMap -> UsedNames -> FunDef (Aliases KernelsMem) -> (LastUseMap, UsedNames)
+analyseFun lu_map used_names fun =
+  let (lu_map', used_names') = analyseBody lu_map used_names $ funDefBody fun
+   in (lu_map', used_names' <> freeIn (funDefParams fun))
+
 analyseBody :: LastUseMap -> UsedNames -> Body (Aliases KernelsMem) -> (LastUseMap, UsedNames)
 analyseBody lu_map used_names (Body ((body_aliases, consumed), ()) stms result) =
   let used_names' =
@@ -44,15 +50,21 @@ analyseBody lu_map used_names (Body ((body_aliases, consumed), ()) stms result) 
           <> foldMap unAliases body_aliases
           <> unAliases consumed
           <> freeIn result
-      (lu_map', used_names'') = foldr analyseStm (lu_map, used_names) $ stmsToList stms
+      (lu_map', used_names'') = analyseStms lu_map used_names stms
    in (lu_map <> lu_map', used_names' <> used_names'')
+
+analyseStms :: LastUseMap -> UsedNames -> Stms (Aliases KernelsMem) -> (LastUseMap, UsedNames)
+analyseStms lu_map used_names stms = foldr analyseStm (lu_map, used_names) $ stmsToList stms
 
 analyseStm :: Stm (Aliases KernelsMem) -> (LastUseMap, UsedNames) -> (LastUseMap, UsedNames)
 analyseStm (Let pat aux e) (lu_map, used_names) =
   let pat_name = patElemName $ head $ patternValueElements pat
       (lus, lu_map', used_names') = analyseExp (lu_map, used_names) e
       aliases = unAliases $ fst $ stmAuxDec aux
-   in (Map.insert pat_name (lus <> aliases) lu_map', used_names' <> aliases)
+      lus' = (lus `namesSubtract` aliases) `namesSubtract` used_names
+   in trace
+        (unwords ["analyseStm", pretty pat_name, "aliases", pretty aliases, "lus'", pretty lus'])
+        (Map.insert pat_name lus' lu_map', used_names' <> aliases)
 
 analyseExp :: (LastUseMap, UsedNames) -> Exp (Aliases KernelsMem) -> (Names, LastUseMap, UsedNames)
 analyseExp (lu_map, used_names) e@(BasicOp _) =
@@ -65,7 +77,9 @@ analyseExp (lu_map, used_names) (If cse then_body else_body dec) =
   let (lu_map_then, used_names_then) = analyseBody lu_map used_names then_body
       (lu_map_else, used_names_else) = analyseBody lu_map used_names else_body
       used_names' = used_names_then <> used_names_else
-      nms = (freeIn cse <> freeIn dec) `namesSubtract` used_names'
+      nms =
+        ((freeIn cse <> freeIn dec) `namesSubtract` used_names')
+          <> ((freeIn (bodyResult then_body) <> freeIn (bodyResult else_body)) `namesSubtract` used_names)
    in (nms, lu_map_then <> lu_map_else, used_names')
 analyseExp (lu_map, used_names) (DoLoop ctx vals form body) =
   let (lu_map', used_names') = analyseBody lu_map used_names body
@@ -83,18 +97,19 @@ analyseExp (lu_map, used_names) (Op (Inner (SegOp (SegMap lvl _ tps body)))) =
   let (lu_map', used_names') = analyseKernelBody (lu_map, used_names) body
       nms = (freeIn lvl <> freeIn tps) `namesSubtract` used_names'
    in (nms, lu_map', used_names' <> nms)
-analyseExp (lu_map, used_names) (Op (Inner (SegOp (SegRed lvl _ binop tps body)))) =
-  let (lu_map', used_names') = foldr analyseSegBinOp (lu_map, used_names) binop
+analyseExp (lu_map, used_names) (Op (Inner (SegOp (SegRed lvl _ binops tps body)))) =
+  segOpHelper lu_map used_names lvl binops tps body
+analyseExp (lu_map, used_names) (Op (Inner (SegOp (SegScan lvl _ binops tps body)))) =
+  segOpHelper lu_map used_names lvl binops tps body
+analyseExp (lu_map, used_names) (Op (Inner (SegOp (SegHist lvl _ binops tps body)))) =
+  let (lu_map', used_names') = foldr analyseHistOp (lu_map, used_names) binops
       (lu_map'', used_names'') = analyseKernelBody (lu_map', used_names') body
       nms = (freeIn lvl <> freeIn tps) `namesSubtract` used_names''
    in (nms, lu_map'', used_names'' <> nms)
-analyseExp (lu_map, used_names) (Op (Inner (SegOp (SegScan lvl _ binop tps body)))) =
-  let (lu_map', used_names') = foldr analyseSegBinOp (lu_map, used_names) binop
-      (lu_map'', used_names'') = analyseKernelBody (lu_map', used_names') body
-      nms = (freeIn lvl <> freeIn tps) `namesSubtract` used_names''
-   in (nms, lu_map'', used_names'' <> nms)
-analyseExp (lu_map, used_names) (Op (Inner (SegOp (SegHist lvl _ binop tps body)))) =
-  let (lu_map', used_names') = foldr analyseHistOp (lu_map, used_names) binop
+
+segOpHelper :: (Foldable t, FreeIn lvl, FreeIn tps) => Map VName Names -> Names -> lvl -> t (SegBinOp (Aliases KernelsMem)) -> tps -> KernelBody (Aliases KernelsMem) -> (Names, LastUseMap, UsedNames)
+segOpHelper lu_map used_names lvl binops tps body =
+  let (lu_map', used_names') = foldr analyseSegBinOp (lu_map, used_names) binops
       (lu_map'', used_names'') = analyseKernelBody (lu_map', used_names') body
       nms = (freeIn lvl <> freeIn tps) `namesSubtract` used_names''
    in (nms, lu_map'', used_names'' <> nms)

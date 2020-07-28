@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Control.Category ((>>>))
+import Futhark.Analysis.LastUse
 import Futhark.Compiler
   ( newFutharkConfig,
     runCompilerOnProgram,
@@ -12,7 +13,6 @@ import Futhark.Pass.Simplify
 import Futhark.Passes (kernelsPipeline)
 import Futhark.Pipeline
 import GHC.IO.Encoding (setLocaleEncoding)
-import LastUse
 import System.Environment (getArgs)
 import System.IO
 
